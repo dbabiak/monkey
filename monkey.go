@@ -3,55 +3,149 @@ package main
 import (
 	"fmt"
 	"github.com/dbabiak/dbgo"
-	"strings"
 )
 
 type TokenType string
 
 type Token struct {
-	Type TokenType
+	Type    TokenType
 	Literal string
 	LineNum int
-	Col int
+	Col     int
 }
 
-func Let(xs []rune, i int) (nextPos int, literal string, matched bool) {
-	const token = "let"
-	if len(token) <= len(xs) - i  {
-		if literal := string(xs[i:i+len(token)]); literal == token {
-			return i + len(token), literal, true
-		}
+const (
+	LET         = TokenType("LET")
+	FUNCTION    = TokenType("FUNCTION")
+	IDENTIFIER  = TokenType("IDENTIFIER")
+	EQUALS      = TokenType("EQUALS")
+	PLUS        = TokenType("PLUS")
+	SEMICOLON   = TokenType("SEMICOLON")
+	NUMBER      = TokenType("NUMBER")
+	OPEN_PAREN  = TokenType("OPEN_PAREN")
+	CLOSE_PAREN = TokenType("CLOSE_PAREN")
+	OPEN_BRACE  = TokenType("OPEN_BRACE")
+	CLOSE_BRACE = TokenType("CLOSE_BRACE")
+	COMMA       = TokenType("COMMA")
+)
+
+var keywords = map[string]TokenType{
+	"fn": FUNCTION,
+	"let": LET,
+}
+
+func isLetter(r rune) bool {
+	return ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z')
+}
+
+func isDigit(r rune) bool {
+	return '0' <= r && r <= '9'
+}
+
+func assert(b bool, msg string) {
+	if !b {
+		panic(msg)
 	}
-	return 0, "", false
 }
 
-func main() {
-	dbgo.System("cat data/demo.monkey")
-	println("\n\n---------------\n")
+func Identifier(xs []rune, i int) (nextPos int, literal string, matched bool) {
+	assert(i < len(xs), "i must be in bounds")
+	j := i
+	for {
+		if !isLetter(xs[j]) {
+			break
+		}
+		j += 1
+	}
+	if i == j {
+		return 0, "", false
+	}
+	return j, string(xs[i:j]), true
+}
 
-	lines := dbgo.PathToLines("data/demo.monkey")
+func Number(xs []rune, i int) (nextPos int, literal string, matched bool) {
+	assert(i < len(xs), "i must be in bounds")
+	j := i
+	for {
+		if !isDigit(xs[j]) {
+			break
+		}
+		j += 1
+	}
+	if i == j {
+		return 0, "", false
+	}
+	return j, string(xs[i:j]), true
+}
+
+
+func TokType(ident string) TokenType {
+	// have we lexed a keyword or a regular identifier?
+	if tokType, ok := keywords[ident]; ok {
+		return tokType
+	}
+	return IDENTIFIER
+}
+
+func nextToken(line []rune, linenum, col int) Token {
+	assert(col < len(line), "i must be in bounds")
+	switch line[col] {
+	case '(':
+		return Token{OPEN_PAREN, "(", linenum, col}
+	case ')':
+		return Token{CLOSE_PAREN, ")", linenum, col}
+	case '{':
+		return Token{OPEN_BRACE, "{", linenum, col}
+	case '}':
+		return Token{CLOSE_BRACE, "}", linenum, col}
+	case '=':
+		return Token{EQUALS, "=", linenum, col}
+	case ',':
+		return Token{COMMA, ",", linenum, col}
+	case ';':
+		return Token{SEMICOLON, ";", linenum, col}
+	case '+':
+		return Token{PLUS, "+", linenum, col}
+	}
+
+	_, literal, match := Identifier(line, col)
+	if match {
+		return Token{TokType(literal), literal, linenum, col}
+	}
+
+	_, literal, match = Number(line, col)
+	if match {
+		return Token{NUMBER, literal, linenum, col}
+	}
+
+	panic(fmt.Sprintf("line %d col %d cannot lex %#v", linenum, col, string(line[col:])))
+}
+
+func Lex(filename string) []Token {
+	lines := dbgo.PathToLines(filename)
 
 	tokens := []Token{}
 	for linenum, line := range lines {
 		// this is safe b/c no way for a token to be split by a new line
-		runes := []rune(strings.TrimSpace(line))
-		println(linenum, line)
-		for i := 0; i < len(runes); i++ {
-			if runes[i] == '\\' {
-				continue
+		runes := []rune(line)
+		NextRune:
+		for i := 0; i < len(runes); {
+			if runes[i] == '\\' || runes[i] == ' ' {
+				i += 1
+				continue NextRune
 			}
 
-			next, literal, matched := Let(runes, i)
-			if matched {
-				tokens = append(tokens, Token{
-					Type: TokenType("LET"),
-					Literal: literal,
-					LineNum: linenum,
-					Col: i,
-				})
-				i = next
-			}
+			token := nextToken(runes, linenum, i)
+			i += len(token.Literal)
+			tokens = append(tokens, token)
 		}
 	}
-	fmt.Printf("%v\n", tokens)
+	return tokens
+}
+
+func main() {
+	tokens := Lex("data/demo.monkey")
+	for _, token := range tokens {
+		fmt.Printf("%v\n", token)
+	}
 }
